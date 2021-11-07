@@ -35,9 +35,11 @@ impl fmt::Display for Operator {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Node {
+    Print(Box<Node>),
     True,
     False,
-    Int(f64),
+    Int(i128),
+    Float(f64),
     Str(String),
     UnaryExpr {
         op: Operator,

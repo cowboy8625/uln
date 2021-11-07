@@ -1,48 +1,12 @@
-// use crate::error::*;
+use crate::error::{Error, ErrorKind};
 use std::fmt;
-// use std::ops::{Index, Range};
-// use std::slice::SliceIndex;
-//
-// #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-// pub struct Position {
-//     row: usize,
-//     col: usize,
-//     idx: usize,
-// }
-//
-// #[derive(Debug, Default)]
-// pub struct ParseInput<'a> {
-//     input: InputStream<'a>,
-//     pos: Position,
-// }
-//
-// impl<'a> Index<Range<usize>> for ParseInput<'a> {
-//     type Output = InputStream<'a>;
-//
-//     fn index(&self, range: Range<usize>) -> &Self::Output {
-//         &self.input[range]
-//     }
-// }
-//
-// #[test]
-// fn parse_input() {
-//     let parse_input = ParseInput {
-//         input: "Hey",
-//         pos: Position::default(),
-//     };
-//     assert_eq!(parse_input[0..1], "H");
-// }
 
-enum ParseError {
-    Error(String, Box<ParseError>),
-    Null,
-}
-
-pub type ParseResult<'a, Output> = Result<(InputStream<'a>, Output), InputStream<'a>>;
-pub type InputStream<'a> = &'a str;
+pub type Input = String;
+pub type InputStream = (Input, Option<Error<Input>>);
+pub type ParseResult<Output> = Result<(InputStream, Output), InputStream>;
 
 pub trait Parser<'a, Output> {
-    fn parse(&self, input: &'a str) -> ParseResult<'a, Output>;
+    fn parse(&self, input: InputStream) -> ParseResult<Output>;
 
     fn map<F, NewOutput>(self, map_fn: F) -> BoxedParser<'a, NewOutput>
     where
@@ -52,6 +16,15 @@ pub trait Parser<'a, Output> {
         F: Fn(Output) -> NewOutput + 'a,
     {
         BoxedParser::new(map(self, map_fn))
+    }
+
+    fn map_err<F>(self, map_err_fn: F) -> BoxedParser<'a, Output>
+    where
+        Self: Sized + 'a,
+        Output: fmt::Debug + 'a,
+        F: Fn(InputStream) -> InputStream + 'a,
+    {
+        BoxedParser::new(map_err(self, map_err_fn))
     }
 
     fn pred<F>(self, pred_fn: F) -> BoxedParser<'a, Output>
@@ -77,9 +50,9 @@ pub trait Parser<'a, Output> {
 
 impl<'a, F, Output> Parser<'a, Output> for F
 where
-    F: Fn(&'a str) -> ParseResult<Output>,
+    F: Fn(InputStream) -> ParseResult<Output>,
 {
-    fn parse(&self, input: &'a str) -> ParseResult<'a, Output> {
+    fn parse(&self, input: InputStream) -> ParseResult<Output> {
         self(input)
     }
 }
@@ -106,35 +79,50 @@ impl<'a, Output> fmt::Debug for BoxedParser<'a, Output> {
 }
 
 impl<'a, Output> Parser<'a, Output> for BoxedParser<'a, Output> {
-    fn parse(&self, input: &'a str) -> ParseResult<'a, Output> {
+    fn parse(&self, input: InputStream) -> ParseResult<Output> {
         self.parser.parse(input)
     }
 }
 
-pub(crate) fn match_literal<'a>(expected: &'static str) -> impl Parser<'a, ()> {
-    move |input: &'a str| match input.get(0..expected.len()) {
-        Some(next) if next == expected => Ok((&input[expected.len()..], ())),
-        _ => Err(input),
+pub(crate) fn tag<'a>(expected: &'static str) -> impl Parser<'a, ()> {
+    move |(input, _error): InputStream| match input.get(0..expected.len()) {
+        Some(next) if next == expected => Ok(((input[expected.len()..].into(), None), ())),
+        _ => Err((
+            input.clone(),
+            Some(Error::new(input, ErrorKind::Tag(expected.into()))),
+        )),
     }
 }
 
 #[test]
-fn literal_parser() {
-    let parse_joe = match_literal("Hello Joe!");
-    assert_eq!(Ok(("", ())), parse_joe.parse("Hello Joe!"));
+fn tag_parser() {
+    let parse_joe = tag("Hello Joe!");
     assert_eq!(
-        Ok((" Hello Robert!", ())),
-        parse_joe.parse("Hello Joe! Hello Robert!")
+        Ok((("".into(), None), ())),
+        parse_joe.parse(("Hello Joe!".into(), None))
     );
-    assert_eq!(Err("Hello Mike!"), parse_joe.parse("Hello Mike!"));
+    assert_eq!(
+        Err((
+            "Hello!".into(),
+            Some(Error::new(
+                "Hello!".into(),
+                ErrorKind::Tag("Hello Joe!".into())
+            ))
+        )),
+        parse_joe.parse(("Hello!".into(), None))
+    );
+    assert_eq!(
+        Ok((("=".into(), None), ())),
+        tag(">").parse((">=".into(), None))
+    );
 }
 
-pub(crate) fn identifier(input: &str) -> ParseResult<String> {
+pub(crate) fn identifier<'a>((input, error): InputStream) -> ParseResult<String> {
     let mut matched = String::new();
     let mut chars = input.chars();
     match chars.next() {
         Some(next) if next.is_alphabetic() => matched.push(next),
-        _ => return Err(input),
+        _ => return Err((input.clone(), Some(Error::new(input, ErrorKind::Ident)))),
     }
 
     while let Some(next) = chars.next() {
@@ -146,22 +134,56 @@ pub(crate) fn identifier(input: &str) -> ParseResult<String> {
     }
 
     let next_index = matched.len();
-    Ok((&input[next_index..], matched))
+    Ok(((input[next_index..].into(), None), matched))
 }
 
 #[test]
 fn identifier_parser() {
     assert_eq!(
-        Ok(("", "i-am-an-identifier".to_string())),
-        identifier("i-am-an-identifier")
+        Ok((("".into(), None), "i-am-an-identifier".into())),
+        identifier(("i-am-an-identifier".into(), None))
     );
     assert_eq!(
-        Ok((" entirely an identifier", "not".to_string())),
-        identifier("not entirely an identifier")
+        Ok(((" entirely an identifier".into(), None), "not".into())),
+        identifier(("not entirely an identifier".into(), None))
     );
+    let input: String = "!not at all an identifier".into();
     assert_eq!(
-        Err("!not at all an identifier"),
-        identifier("!not at all an identifier")
+        Err((
+            input.clone(),
+            Some(Error::new(input.clone(), ErrorKind::Ident))
+        )),
+        identifier((input, None))
+    );
+}
+
+pub(crate) fn number((input, error): InputStream) -> ParseResult<String> {
+    let mut matched = String::new();
+    let mut chars = input.chars();
+
+    match chars.next() {
+        Some(next) if next.is_numeric() => matched.push(next),
+        Some(next) if !next.is_numeric() => {
+            return Err((input.clone(), Some(Error::new(input, ErrorKind::Float))));
+        }
+        _ => return Err((input, error)),
+    }
+
+    while let Some(next) = chars.next() {
+        if next.is_numeric() || (next == '.' && !matched.contains('.')) {
+            matched.push(next);
+        } else {
+            break;
+        }
+    }
+    Ok(((input[matched.len()..].into(), None), matched))
+}
+
+#[test]
+fn number_parser() {
+    assert_eq!(
+        Ok((("".into(), None), "123.321".into())),
+        number(("123.321".into(), None))
     );
 }
 
@@ -181,17 +203,19 @@ where
 
 #[test]
 fn pair_combinator() {
-    let tag_opener = pair(match_literal("<"), identifier);
-    assert_eq!(
-        Ok(("/>", ((), "my-first-element".to_string()))),
-        tag_opener.parse("<my-first-element/>")
-    );
-    assert_eq!(Err("oops"), tag_opener.parse("oops"));
-    assert_eq!(Err("!oops"), tag_opener.parse("<!oops"));
-
-    let less_equal = pair(match_literal("<"), match_literal("="));
-    assert_eq!(Ok(("", ((), ()))), less_equal.parse("<="));
-    assert_eq!(Err("=="), less_equal.parse("=="));
+    // let tag_opener = pair(tag("<".into()), identifier);
+    // assert_eq!(
+    //     Ok(("/>".into(), ((), "my-first-element".to_string()))),
+    //     tag_opener.parse("<my-first-element/>".into())
+    // );
+    // assert_eq!(
+    //     Err(ParseInput::from("oops").with(Error::FailureToMatchLitral("<"))),
+    //     tag_opener.parse("oops".into())
+    // );
+    // assert_eq!(
+    //     Err(ParseInput::from("!oops")),
+    //     tag_opener.parse("<!oops".into())
+    // );
 }
 
 fn map<'a, P, F, A, B>(parser: P, map_fn: F) -> impl Parser<'a, B>
@@ -224,30 +248,33 @@ where
 
 #[test]
 fn right_combinator() {
-    let tag_opener = right(match_literal("<"), identifier);
-    assert_eq!(
-        Ok(("/>", "my-first-element".to_string())),
-        tag_opener.parse("<my-first-element/>")
-    );
-    assert_eq!(Err("oops"), tag_opener.parse("oops"));
-    assert_eq!(Err("!oops"), tag_opener.parse("<!oops"));
+    // let tag_opener = right(tag("<"), identifier);
+    // assert_eq!(
+    //     Ok(("/>".into(), "my-first-element".to_string())),
+    //     tag_opener.parse("<my-first-element/>".into())
+    // );
+    // assert_eq!(
+    //     Err(ParseInput::from("oops").with(Error::FailureToMatchLitral("<"))),
+    //     tag_opener.parse("oops".into())
+    // );
+    // assert_eq!(Err("!oops".into()), tag_opener.parse("<!oops".into()));
 }
 
 pub(crate) fn one_or_more<'a, P, A>(parser: P) -> impl Parser<'a, Vec<A>>
 where
     P: Parser<'a, A>,
 {
-    move |mut input| {
+    move |mut input: InputStream| {
         let mut result = Vec::new();
 
-        if let Ok((next_input, first_item)) = parser.parse(input) {
+        if let Ok((next_input, first_item)) = parser.parse(input.clone()) {
             input = next_input;
             result.push(first_item);
         } else {
             return Err(input);
         }
 
-        while let Ok((next_input, next_item)) = parser.parse(input) {
+        while let Ok((next_input, next_item)) = parser.parse(input.clone()) {
             input = next_input;
             result.push(next_item);
         }
@@ -258,20 +285,23 @@ where
 
 #[test]
 fn one_or_more_combinator() {
-    let parser = one_or_more(match_literal("ha"));
-    assert_eq!(Ok(("", vec![(), (), ()])), parser.parse("hahaha"));
-    assert_eq!(Err("ahah"), parser.parse("ahah"));
-    assert_eq!(Err(""), parser.parse(""));
+    // let parser = one_or_more(tag("ha"));
+    // assert_eq!(
+    //     Ok(("".into(), vec![(), (), ()])),
+    //     parser.parse("hahaha".into())
+    // );
+    // assert_eq!(Err("ahah".into()), parser.parse("ahah".into()));
+    // assert_eq!(Err("".into()), parser.parse("".into()));
 }
 
 pub(crate) fn zero_or_more<'a, P, A>(parser: P) -> impl Parser<'a, Vec<A>>
 where
     P: Parser<'a, A>,
 {
-    move |mut input| {
+    move |mut input: InputStream| {
         let mut result = Vec::new();
 
-        while let Ok((next_input, next_item)) = parser.parse(input) {
+        while let Ok((next_input, next_item)) = parser.parse(input.clone()) {
             input = next_input;
             result.push(next_item);
         }
@@ -282,16 +312,19 @@ where
 
 #[test]
 fn zero_or_more_combinator() {
-    let parser = zero_or_more(match_literal("ha"));
-    assert_eq!(Ok(("", vec![(), (), ()])), parser.parse("hahaha"));
-    assert_eq!(Ok(("ahah", vec![])), parser.parse("ahah"));
-    assert_eq!(Ok(("", vec![])), parser.parse(""));
+    // let parser = zero_or_more(tag("ha"));
+    // assert_eq!(
+    //     Ok(("".into(), vec![(), (), ()])),
+    //     parser.parse("hahaha".into())
+    // );
+    // assert_eq!(Ok(("ahah".into(), vec![])), parser.parse("ahah".into()));
+    // assert_eq!(Ok(("".into(), vec![])), parser.parse("".into()));
 }
 
-pub(crate) fn any_char(input: &str) -> ParseResult<char> {
+pub(crate) fn any_char<'a>((input, _error): InputStream) -> ParseResult<char> {
     match input.chars().next() {
-        Some(next) => Ok((&input[next.len_utf8()..], next)),
-        _ => Err(input),
+        Some(next) => Ok(((input[next.len_utf8()..].into(), None), next)),
+        _ => Err((input.clone(), Some(Error::new(input, ErrorKind::AnyChar)))),
     }
 }
 
@@ -300,8 +333,8 @@ where
     P: Parser<'a, A>,
     F: Fn(&A) -> bool,
 {
-    move |input| {
-        if let Ok((next_input, value)) = parser.parse(input) {
+    move |input: InputStream| {
+        if let Ok((next_input, value)) = parser.parse(input.clone()) {
             if predicate(&value) {
                 return Ok((next_input, value));
             }
@@ -313,8 +346,10 @@ where
 #[test]
 fn predicate_combinator() {
     let parser = pred(any_char, |c| *c == 'o');
-    assert_eq!(Ok(("mg", 'o')), parser.parse("omg"));
-    assert_eq!(Err("lol"), parser.parse("lol"));
+    assert_eq!(
+        Ok((("mg".into(), None), 'o')),
+        parser.parse(("omg".into(), None))
+    );
 }
 
 pub(crate) fn whitespace_char<'a>() -> impl Parser<'a, char> {
@@ -331,11 +366,8 @@ pub(crate) fn space0<'a>() -> impl Parser<'a, Vec<char>> {
 
 pub(crate) fn quoted_string<'a>() -> impl Parser<'a, String> {
     right(
-        match_literal("\""),
-        left(
-            zero_or_more(any_char.pred(|c| *c != '"')),
-            match_literal("\""),
-        ),
+        tag("\""),
+        left(zero_or_more(any_char.pred(|c| *c != '"')), tag("\"")),
     )
     .map(|chars| chars.into_iter().collect())
 }
@@ -343,8 +375,8 @@ pub(crate) fn quoted_string<'a>() -> impl Parser<'a, String> {
 #[test]
 pub fn quoted_string_parser() {
     assert_eq!(
-        Ok(("", "Hello Joe!".to_string())),
-        quoted_string().parse("\"Hello Joe!\"")
+        Ok((("".into(), None), "Hello Joe!".to_string())),
+        quoted_string().parse(("\"Hello Joe!\"".into(), None))
     );
 }
 
@@ -353,10 +385,26 @@ where
     P1: Parser<'a, A>,
     P2: Parser<'a, A>,
 {
-    move |input| match parser1.parse(input) {
+    move |input: InputStream| match parser1.parse(input.clone()) {
         ok @ Ok(_) => ok,
         Err(_) => parser2.parse(input),
     }
+}
+
+#[test]
+pub fn either_combiantor() {
+    assert_eq!(
+        Ok(((" \"two\"".into(), None), "2".into())),
+        either(number, quoted_string()).parse(("2 \"two\"".into(), None))
+    );
+    assert_eq!(
+        Ok(((" 2".into(), None), "two".into())),
+        either(number, quoted_string()).parse(("\"two\" 2".into(), None))
+    );
+    assert_eq!(
+        Ok((("".into(), None), ())),
+        either(tag("hey"), either(tag("there"), tag("one"))).parse(("one".into(), None))
+    );
 }
 
 pub fn and_then<'a, P, F, A, B, NextP>(parser: P, f: F) -> impl Parser<'a, B>
@@ -371,9 +419,21 @@ where
     }
 }
 
-pub(crate) fn whitespace_wrap<'a, P, A>(parser: P) -> impl Parser<'a, A>
+pub(crate) fn trim<'a, P, A>(parser: P) -> impl Parser<'a, A>
 where
     P: Parser<'a, A>,
 {
     right(space0(), left(parser, space0()))
+}
+
+fn map_err<'a, P, F, A>(parser: P, map_err_fn: F) -> impl Parser<'a, A>
+where
+    P: Parser<'a, A>,
+    F: Fn(InputStream) -> InputStream + 'a,
+{
+    move |input| {
+        parser
+            .parse(input)
+            .map_err(|next_input| map_err_fn(next_input))
+    }
 }
