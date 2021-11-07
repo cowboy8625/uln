@@ -1,27 +1,61 @@
-// program        → statement* EOF ;
+// program        → declaration* EOF ;
+// declaration    → letDecl | statement ;
 // statement      → exprStmt | printStmt ;
+// letDecl        → "let" IDENTIFIER ( "=" expression )? ";" ;
 // exprStmt       → expression ";" ;
 // printStmt      → "print" expression ";" ;
-//
 // expression     → equality ;
 // equality       → comparison ( ( "!=" | "==" ) comparison )* ;
 // comparison     → term ( ( ">" | ">=" | "<" | "<=" ) term )* ;
 // term           → factor ( ( "-" | "+" ) factor )* ;
 // factor         → unary ( ( "/" | "*" ) unary )* ;
 // unary          → ( "!" | "-" ) unary | primary ;
-// primary        → INT | FLOAT | STRING | "true" | "false" | "(" expression ")" ;
+// primary        → NUMBER | STRING | "true" | "false" | "(" expression ")" | IDENTIFIER ;
 use crate::combinators::*;
 use crate::node::{Node, Operator};
+
+// program        → declaration* EOF ;
 pub fn program<'a>() -> impl Parser<'a, Node> {
-    print_statement()
+    declaration()
+}
+
+// declaration    → letDecl | statement ;
+fn declaration<'a>() -> impl Parser<'a, Node> {
+    either(let_decl(), statement())
+}
+
+// letDecl        → "let" IDENTIFIER ( "=" expression )? ";" ;
+fn let_decl<'a>() -> impl Parser<'a, Node> {
+    pair(
+        pair(
+            pair(trim(tag("let")), identifier),
+            pair(trim(tag("=")), expression()),
+        ),
+        tag(";"),
+    )
+    .map(|(((_, ident), (_, exp)), _)| Node::Variable {
+        ident,
+        exp: Box::new(exp),
+    })
+}
+
+// statement      → exprStmt | printStmt ;
+fn statement<'a>() -> impl Parser<'a, Node> {
+    either(expr_statement(), print_statement())
+}
+
+// exprStmt       → expression ";" ;
+fn expr_statement<'a>() -> impl Parser<'a, Node> {
+    pair(expression(), tag(";")).map(|(n, _)| n)
 }
 
 // printStmt      → "print" expression ";" ;
-pub fn print_statement<'a>() -> impl Parser<'a, Node> {
-    either(
-        pair(tag("print"), expression()).map(|(_, exp)| Node::Print(Box::new(exp))),
-        expression(),
+fn print_statement<'a>() -> impl Parser<'a, Node> {
+    pair(
+        pair(tag("print"), right(tag("("), left(expression(), tag(")")))),
+        tag(";"),
     )
+    .map(|((_, exp), _)| Node::Print(Box::new(exp)))
 }
 
 fn expression<'a>() -> impl Parser<'a, Node> {
@@ -208,19 +242,28 @@ fn unary_bang<'a>() -> impl Parser<'a, Node> {
         })
 }
 
-// primary        → INT | FLOAT | STRING | "true" | "false" | "(" expression ")" ;
+// primary        → NUMBER | STRING | "true" | "false" | "(" expression ")" | IDENTIFIER ;
 fn primary<'a>() -> impl Parser<'a, Node> {
     either(
-        either(primary_number(), primary_string()),
-        either(primary_bool(), primary_paren()),
+        either(
+            either(primary_number(), primary_string()),
+            either(primary_bool(), primary_paren()),
+        ),
+        primary_ident(),
     )
 }
 
+// primary → IDENTIFIER
+fn primary_ident<'a>() -> impl Parser<'a, Node> {
+    identifier.map(|name| Node::Ident(name))
+}
+
+// primary → "(" expression ")"
 fn primary_paren<'a>() -> impl Parser<'a, Node> {
     right(tag("("), left(expression(), tag(")")))
 }
 
-// primary → STRING
+// primary → BOOL
 fn primary_bool<'a>() -> impl Parser<'a, Node> {
     either(
         tag("true").map(|_| Node::True),

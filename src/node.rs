@@ -36,6 +36,11 @@ impl fmt::Display for Operator {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Node {
     Print(Box<Node>),
+    Ident(String),
+    Variable {
+        ident: String,
+        exp: Box<Node>,
+    },
     True,
     False,
     Int(i128),

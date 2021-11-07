@@ -13,6 +13,6 @@ mod node;
 mod parser;
 
 pub use combinators::{ParseResult, Parser};
-pub use interpreter::{eval, Value};
+pub use interpreter::{eval, Environment, Value};
 pub use node::{Node, Operator};
 pub use parser::program;
