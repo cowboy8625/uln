@@ -64,6 +64,7 @@ pub fn shell() {
             ":clear" => print!("\x1b[2J\x1b[0;0H"),
             ":debug io" => debug_output = !debug_output,
             ":debug node" => debug_node = !debug_node,
+            ":help" => help(),
             _ => match program().parse((block.trim().into(), None)) {
                 Ok(((doc, _), nodes)) => {
                     if debug_node {
@@ -105,4 +106,31 @@ pub fn shell() {
 
         block.clear();
     }
+}
+
+fn help() {
+    println!(
+        "\x1b[1m\x1b[31m[HELP]:\x1b[37m \n{}",
+        format!(
+            "Shell Commands start with -> {red}:
+    {green}:exit{reset} ---------> {cyan}exit program.
+    {green}:help{reset} ---------> {cyan}Output this message.
+    {green}:clear{reset} --------> {cyan}Clear shell screen.
+    {green}:debug_io{reset} -----> {cyan}shows Value output, more useful for development.
+    {green}:debug_node{reset} ---> {cyan}shows AST output, more useful for development.{reset}
+
+
+    Language Syntax:
+        hello = {green}\"Hello\"{reset}
+        space = {green}\" \"{reset}
+        world = {green}\"World\"{reset}
+        {cyan}print{reset} hello + space + world {reset}{reset_font}
+                         ",
+            green = "\x1b[32m",
+            reset = "\x1b[37m",
+            cyan = "\x1b[36m",
+            red = "\x1b[31m",
+            reset_font = "\x1b[0m"
+        )
+    );
 }

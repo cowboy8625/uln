@@ -42,6 +42,7 @@ pub enum EvalError {
     TypeError(String),
     SyntaxError(String),
     UnKnownIdent(String),
+    Mutations(String),
 }
 
 impl fmt::Display for EvalError {
@@ -50,6 +51,7 @@ impl fmt::Display for EvalError {
             Self::TypeError(e) => write!(f, "TypeError: {}", e),
             Self::SyntaxError(e) => write!(f, "SyntaxError: {}", e),
             Self::UnKnownIdent(e) => write!(f, "UnKnownIdent: {}", e),
+            Self::Mutations(e) => write!(f, "Mutations: {}", e),
         }
     }
 }
@@ -69,6 +71,15 @@ pub fn eval(node: Node, mut env: Environment) -> EvalResult {
             None => Err((EvalError::UnKnownIdent(ident), env)),
         },
         Node::Variable { ident, exp } => {
+            if env.contains_key(&ident) {
+                return Err((
+                    EvalError::Mutations(format!(
+                        "Mutation is not allowed! Variable `{}` already exists.",
+                        ident
+                    )),
+                    env,
+                ));
+            }
             env.insert(ident, *exp);
             return Ok((Value::NONE, env));
         }
@@ -181,4 +192,17 @@ pub fn eval(node: Node, mut env: Environment) -> EvalResult {
             }
         }
     }
+}
+
+#[test]
+fn ident_node_eval() {
+    let env = Environment::new();
+    let node = Node::Variable {
+        ident: "foo".into(),
+        exp: Box::new(Node::Int(1)),
+    };
+    let (node, env) = eval(node, env).unwrap();
+    eprintln!("Env:  {:?}", env);
+    eprintln!("Node: {:?}", node);
+    assert!(false);
 }

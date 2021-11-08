@@ -1,9 +1,10 @@
 // program        → declaration* EOF ;
-// declaration    → letDecl | statement ;
-// statement      → exprStmt | printStmt ;
-// letDecl        → "let" IDENTIFIER ( "=" expression )? ";" ;
-// exprStmt       → expression ";" ;
-// printStmt      → "print" expression ";" ;
+// declaration    → varDecl | statement ;
+// statement      → printStmt | expression | ifStmt | block ;
+// block          → "{" declaration "}"
+// ifStmt         → "if" expression "then" statement ( "else" statement )? ;
+// varDecl        → IDENTIFIER ( "=" expression )? ;
+// printStmt      → "print" expression
 // expression     → equality ;
 // equality       → comparison ( ( "!=" | "==" ) comparison )* ;
 // comparison     → term ( ( ">" | ">=" | "<" | "<=" ) term )* ;
@@ -19,43 +20,32 @@ pub fn program<'a>() -> impl Parser<'a, Node> {
     declaration()
 }
 
-// declaration    → letDecl | statement ;
+// declaration    → varDecl | statement ;
 fn declaration<'a>() -> impl Parser<'a, Node> {
-    either(let_decl(), statement())
+    either(var_decl(), statement())
 }
 
-// letDecl        → "let" IDENTIFIER ( "=" expression )? ";" ;
-fn let_decl<'a>() -> impl Parser<'a, Node> {
-    pair(
-        pair(
-            pair(trim(tag("let")), identifier),
-            pair(trim(tag("=")), expression()),
-        ),
-        tag(";"),
-    )
-    .map(|(((_, ident), (_, exp)), _)| Node::Variable {
+// // block          → "{" declaration "}"
+// fn block<'a>() -> impl Parser<'a, Node> {
+//     pair(trim(tag("{")), pari(declaration(), trim(tag("}")))).map(|(_, (exp, _)) Node::Block(Box::new(exp))|
+// }
+
+// varDecl        → "let" IDENTIFIER ( "=" expression )? ";" ;
+fn var_decl<'a>() -> impl Parser<'a, Node> {
+    pair(pair(identifier, trim(tag("="))), expression()).map(|((ident, _), exp)| Node::Variable {
         ident,
         exp: Box::new(exp),
     })
 }
 
-// statement      → exprStmt | printStmt ;
+// statement      → printStmt | expression ;
 fn statement<'a>() -> impl Parser<'a, Node> {
-    either(expr_statement(), print_statement())
-}
-
-// exprStmt       → expression ";" ;
-fn expr_statement<'a>() -> impl Parser<'a, Node> {
-    pair(expression(), tag(";")).map(|(n, _)| n)
+    either(print_statement(), expression())
 }
 
 // printStmt      → "print" expression ";" ;
 fn print_statement<'a>() -> impl Parser<'a, Node> {
-    pair(
-        pair(tag("print"), right(tag("("), left(expression(), tag(")")))),
-        tag(";"),
-    )
-    .map(|((_, exp), _)| Node::Print(Box::new(exp)))
+    pair(tag("print"), expression()).map(|(_, exp)| Node::Print(Box::new(exp)))
 }
 
 fn expression<'a>() -> impl Parser<'a, Node> {
