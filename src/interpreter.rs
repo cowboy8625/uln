@@ -1,48 +1,20 @@
+#[cfg(test)]
+use pretty_assertions::assert_eq;
 use std::{collections::HashMap, fmt};
 
 use crate::node::{Node, Operator};
+use crate::value::Value;
 
 type EvalResult = Result<(Value, Environment), (EvalError, Environment)>;
 
-#[derive(Debug, Clone)]
-pub enum Value {
-    Float(f64),
-    Int(i128),
-    String(String),
-    Bool(bool),
-    NONE,
-}
-
-impl Value {
-    fn value_type(&self) -> String {
-        match self {
-            Self::Float(_) => "Float".into(),
-            Self::Int(_) => "Int".into(),
-            Self::String(_) => "String".into(),
-            Self::Bool(b) => b.to_string(),
-            Self::NONE => "NONE".to_string(),
-        }
-    }
-}
-
-impl fmt::Display for Value {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Float(n) => write!(f, "{}", n),
-            Self::Int(n) => write!(f, "{}", n),
-            Self::String(s) => write!(f, "{}", s),
-            Self::Bool(b) => write!(f, "{}", b),
-            Self::NONE => write!(f, "NONE"),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EvalError {
     TypeError(String),
     SyntaxError(String),
     UnKnownIdent(String),
     Mutations(String),
+    MismatchedType(String),
+    FunctionParameters(usize, usize),
 }
 
 impl fmt::Display for EvalError {
@@ -51,7 +23,17 @@ impl fmt::Display for EvalError {
             Self::TypeError(e) => write!(f, "TypeError: {}", e),
             Self::SyntaxError(e) => write!(f, "SyntaxError: {}", e),
             Self::UnKnownIdent(e) => write!(f, "UnKnownIdent: {}", e),
-            Self::Mutations(e) => write!(f, "Mutations: {}", e),
+            Self::Mutations(v) => write!(
+                f,
+                "Mutation is not allowed! Variable `{}` already exists.",
+                v
+            ),
+            Self::MismatchedType(e) => write!(f, "MismatchedType: {}", e),
+            Self::FunctionParameters(param, args) => write!(
+                f,
+                "Function Parameter do not match with calling arguments. Expected: {} but got {}",
+                param, args
+            ),
         }
     }
 }
@@ -66,21 +48,51 @@ pub fn eval(node: Node, mut env: Environment) -> EvalResult {
             }
             err @ Err(_) => return err,
         },
-        Node::Ident(ident) => match env.get(&ident) {
-            Some(exp) => eval(exp.clone(), env),
-            None => Err((EvalError::UnKnownIdent(ident), env)),
-        },
-        Node::Variable { ident, exp } => {
-            if env.contains_key(&ident) {
-                return Err((
-                    EvalError::Mutations(format!(
-                        "Mutation is not allowed! Variable `{}` already exists.",
-                        ident
-                    )),
-                    env,
-                ));
+        Node::Ident { ident, args } => match env.get(&ident) {
+            Some(node) => match node {
+                Node::Variable { param, block, .. } => {
+                    let mut block_env = Environment::new();
+                    for (p, arg) in param.iter().zip(args) {
+                        block_env.insert(p.clone(), *arg);
+                    }
+                    match execute_block(*block.clone(), block_env) {
+                        Ok((v, e)) => Ok((v, env)),
+                        Err((input, e)) => {
+                            println!("INPUT: {:?} ENV: {:#?}", input, e);
+                            eval(*block.clone(), env)
+                        }
+                    }
+                }
+                n => {
+                    eval(n.clone(), env)
+                    //     Err((
+                    //     EvalError::TypeError("I think this is the wrong thing maybe.....".into()),
+                    //     env,
+                    // ));
+                }
+            },
+            None => {
+                // println!("VAR env: {:?}", env);
+                // println!("VAR args: {:?}", args);
+                Err((EvalError::UnKnownIdent(ident), env))
             }
-            env.insert(ident, *exp);
+        },
+        Node::Variable {
+            ident,
+            param,
+            block,
+        } => {
+            if env.contains_key(&ident) {
+                return Err((EvalError::Mutations(ident), env));
+            }
+            env.insert(
+                ident.clone(),
+                Node::Variable {
+                    ident,
+                    param,
+                    block,
+                },
+            );
             return Ok((Value::NONE, env));
         }
         Node::True => Ok((Value::Bool(true), env)),
@@ -88,6 +100,31 @@ pub fn eval(node: Node, mut env: Environment) -> EvalResult {
         Node::Int(n) => Ok((Value::Int(n), env)),
         Node::Float(n) => Ok((Value::Float(n), env)),
         Node::Str(string) => Ok((Value::String(string), env)),
+        Node::Conditional {
+            condition,
+            if_branch,
+            else_branch,
+        } => {
+            let (node, env) = eval(*condition, env)?;
+            match node {
+                Value::Bool(b) => {
+                    if b {
+                        return eval(*if_branch, env);
+                    } else {
+                        if let Some(eb) = else_branch {
+                            return eval(*eb, env);
+                        }
+                    }
+                    return Ok((Value::NONE, env));
+                }
+                v => {
+                    return Err((
+                        EvalError::TypeError(format!("Expected a Bool here not `{}`", v)),
+                        env,
+                    ))
+                }
+            }
+        }
         Node::UnaryExpr { op, child } => {
             let (child, env) = eval(*child, env)?;
             match op {
@@ -128,6 +165,20 @@ pub fn eval(node: Node, mut env: Environment) -> EvalResult {
                     Operator::LessThan => Ok((Value::Bool(n1 < n2), env)),
                     Operator::GreaterEqual => Ok((Value::Bool(n1 >= n2), env)),
                     Operator::LessEqual => Ok((Value::Bool(n1 <= n2), env)),
+                    Operator::Or => Err((
+                        EvalError::MismatchedType(format!(
+                            "`{}` or `{}` expected `BOOL` found `Int`",
+                            n1, n2
+                        )),
+                        env,
+                    )),
+                    Operator::And => Err((
+                        EvalError::MismatchedType(format!(
+                            "`{}` and `{}` expected `BOOL` found `Int`",
+                            n1, n2
+                        )),
+                        env,
+                    )),
                     Operator::Bang => Err((
                         EvalError::SyntaxError(format!(
                             "Expected {} {{ + | - | * | / }} {} not a !",
@@ -148,6 +199,20 @@ pub fn eval(node: Node, mut env: Environment) -> EvalResult {
                     Operator::LessThan => Ok((Value::Bool(n1 < n2), env)),
                     Operator::GreaterEqual => Ok((Value::Bool(n1 >= n2), env)),
                     Operator::LessEqual => Ok((Value::Bool(n1 <= n2), env)),
+                    Operator::Or => Err((
+                        EvalError::MismatchedType(format!(
+                            "`{}` or `{}` expected `BOOL` found `Float`",
+                            n1, n2
+                        )),
+                        env,
+                    )),
+                    Operator::And => Err((
+                        EvalError::MismatchedType(format!(
+                            "`{}` and `{}` expected `BOOL` found `Float`",
+                            n1, n2
+                        )),
+                        env,
+                    )),
                     Operator::Bang => Err((
                         EvalError::SyntaxError(format!(
                             "Expected {} {{ + | - | * | / }} {} not a !",
@@ -172,6 +237,8 @@ pub fn eval(node: Node, mut env: Environment) -> EvalResult {
                     Operator::LessThan => Ok((Value::Bool(b1 < b2), env)),
                     Operator::GreaterEqual => Ok((Value::Bool(b1 >= b2), env)),
                     Operator::LessEqual => Ok((Value::Bool(b1 <= b2), env)),
+                    Operator::Or => Ok((Value::Bool(b1 || b2), env)),
+                    Operator::And => Ok((Value::Bool(b1 && b2), env)),
                     op => Err((
                         EvalError::SyntaxError(format!(
                             "Can not use {} on type BOOL | {} {} {}",
@@ -191,18 +258,71 @@ pub fn eval(node: Node, mut env: Environment) -> EvalResult {
                 )),
             }
         }
+        block @ Node::Block(_) => Ok((execute_block(block, Environment::new())?.0, env)),
     }
 }
 
+fn execute_block(node: Node, mut block_env: Environment) -> EvalResult {
+    if let Node::Block(expressions) = node {
+        // println!("BLOCK expressions: {:?}", expressions);
+        // println!("BLOCK block_env: {:?}", block_env);
+        let mut inner = Value::NONE;
+        for exp in expressions {
+            let (i, e) = eval(*exp, block_env)?;
+            block_env = e;
+            inner = i;
+        }
+        return Ok((inner, block_env));
+    }
+    Err((
+        EvalError::TypeError("Never Will Fail HERE. But if so I am in execute_block".into()),
+        block_env,
+    ))
+}
+
 #[test]
-fn ident_node_eval() {
-    let env = Environment::new();
-    let node = Node::Variable {
-        ident: "foo".into(),
-        exp: Box::new(Node::Int(1)),
+fn execute_block_test() {
+    let mut env = Environment::new();
+    let func = Node::Variable {
+        ident: "add".into(),
+        param: vec!["x".into(), "y".into()],
+        block: Box::new(Node::BinaryExpr {
+            op: Operator::Plus,
+            rhs: Box::new(Node::UnaryExpr {
+                op: Operator::Plus,
+                child: Box::new(Node::Ident {
+                    ident: "x".into(),
+                    args: vec![],
+                }),
+            }),
+            lhs: Box::new(Node::UnaryExpr {
+                op: Operator::Plus,
+                child: Box::new(Node::Ident {
+                    ident: "y".into(),
+                    args: vec![],
+                }),
+            }),
+        }),
     };
-    let (node, env) = eval(node, env).unwrap();
-    eprintln!("Env:  {:?}", env);
-    eprintln!("Node: {:?}", node);
-    assert!(false);
+
+    env.insert("add".to_string(), func);
+    let func_call = Node::Ident {
+        ident: "add".into(),
+
+        args: vec![
+            Box::new(Node::UnaryExpr {
+                op: Operator::Plus,
+                child: Box::new(Node::Int(1)),
+            }),
+            Box::new(Node::UnaryExpr {
+                op: Operator::Plus,
+                child: Box::new(Node::Int(2)),
+            }),
+        ],
+    };
+    // eprintln!("{:#?}", env);
+    // eprintln!("----");
+    // eprintln!("{:#?}", func_call);
+    let value = eval(func_call, env.clone());
+    assert_eq!(value, Ok((Value::Int(3), env)));
 }

@@ -1,0 +1,23 @@
+print 1 + 2 + 2 * 5
+FALSE = false
+TRUE = true
+
+if FALSE then
+    print "1 WORKED"
+else if FALSE then
+    print "2 ELSE IF WORKED"
+else
+    print "3 ELSE WORKED"
+
+{
+    one = 1
+    print "IN Side of Block"
+    print one
+}
+
+block_var = {
+    hello = "Hello"
+    world = "World"
+    hello + " " + world
+}
+print block_var

@@ -1,24 +1,21 @@
-// program        → declaration* EOF ;
-// declaration    → letDecl | statement ;
-// statement      → exprStmt | printStmt ;
-//
-// exprStmt       → expression ";" ;
-// printStmt      → "print" expression ";" ;
-// expression     → equality ;
-// equality       → comparison ( ( "!=" | "==" ) comparison )* ;
-// comparison     → term ( ( ">" | ">=" | "<" | "<=" ) term )* ;
-// term           → factor ( ( "-" | "+" ) factor )* ;
-// factor         → unary ( ( "/" | "*" ) unary )* ;
-// unary          → ( "!" | "-" ) unary | primary ;
-//
-// letDecl        → "let" IDENTIFIER ( "=" expression )? ";" ;
-//
-// primary        → NUMBER | STRING | "true" | "false" | "(" expression ")" | IDENTIFIER ;
-use parser_combinator::*;
+// mod combinators;
+// mod error;
+// mod interpreter;
+// mod node;
+// mod parser;
+// mod value;
+
+// pub use combinators::{ParseResult, Parser};
+// pub use interpreter::{eval, Environment};
+// pub use node::{Node, Operator};
+// pub use parser::program;
+// pub use value::Value;
+use lite::*;
 use std::io::{stdout, Write};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    println!("{:?}", args);
     match args.len() {
         1 => shell(),
         2 => run_file(&args[1]),
@@ -30,15 +27,19 @@ fn main() {
 }
 
 fn run_file(path: &str) {
-    let env = Environment::new();
+    let mut env = Environment::new();
     let file = std::fs::read_to_string(path);
     match file {
         Ok(input) => match program().parse((input, None)) {
-            Ok((_, nodes)) => match eval(nodes, env) {
-                Ok(_) => {}
-                Err(e) => println!("\x1b[31m[OUT]:\x1b[37m {:#?}", e),
-            },
-            Err(e) => println!("\x1b[31m[ERROR]:\x1b[37m {:#?}", e),
+            Ok(((_, _), vec_exp)) => {
+                for exp in vec_exp {
+                    env = match eval(exp, env) {
+                        Ok((_, e)) => e,
+                        Err((_, e)) => e,
+                    };
+                }
+            }
+            Err(_) => {}
         },
         Err(_) => {
             println!("Failed to read file.");
@@ -53,6 +54,8 @@ pub fn shell() {
     let mut block = String::new();
     let mut debug_output = false;
     let mut debug_node = false;
+    let mut debug_input = false;
+    let mut debug_env = false;
     loop {
         print!("\x1b[32m[IN]:\x1b[37m ");
         stdout().flush().expect("Flush Failed");
@@ -64,40 +67,45 @@ pub fn shell() {
             ":clear" => print!("\x1b[2J\x1b[0;0H"),
             ":debug io" => debug_output = !debug_output,
             ":debug node" => debug_node = !debug_node,
+            ":debug input" => debug_input = !debug_input,
+            ":debug env" => debug_env = !debug_env,
             ":help" => help(),
-            _ => match program().parse((block.trim().into(), None)) {
-                Ok(((doc, _), nodes)) => {
-                    if debug_node {
-                        println!("\x1b[93m[NODES]:\x1b[95m {:#?}\x1b[37m", nodes);
-                    }
-                    if debug_output {
-                        env = match eval(nodes, env) {
-                            Ok((v, env)) => {
-                                println!("\x1b[31m[OUT]:\x1b[37m {:#?}", v);
-                                env
-                            }
-                            Err((e, env)) => {
-                                println!("\x1b[31m[DEBUG_OUT]:\x1b[37m {:#?}", e);
-                                env
-                            }
-                        };
-                    } else {
-                        env = match eval(nodes, env) {
-                            Ok((v, env)) => {
-                                match v {
-                                    Value::NONE => {}
-                                    v => println!("\x1b[31m[OUT]:\x1b[37m {}", v),
+            _ => match program().parse((block.clone().into(), None)) {
+                Ok(((doc, _), vec_exp)) => {
+                    for exp in vec_exp {
+                        env = match eval(exp.clone(), env) {
+                            Ok((v, e)) => {
+                                if debug_env {
+                                    println!("[ENV]: {:?}", e);
                                 }
-                                env
+                                if debug_input {
+                                    println!("[REMANDING INPUT]: {:?}", doc);
+                                }
+                                if debug_node {
+                                    println!("[NODE]: {:?}", exp);
+                                }
+                                if Value::NONE != v {
+                                    println!("[OUT]: {}", v);
+                                    if debug_input {
+                                        println!("[REMANDING INPUT]: {:?}", doc);
+                                    }
+                                    if debug_node {
+                                        println!("[NODE]: {:?}", exp);
+                                    }
+                                }
+                                e
                             }
-                            Err((e, env)) => {
-                                println!("\x1b[31m[ERROR_OUT]:\x1b[37m {}", e);
-                                env
+                            Err((error, e)) => {
+                                println!("[ERROR]: {}", error);
+                                if debug_input {
+                                    println!("[REMANDING INPUT]: {:?}", doc);
+                                }
+                                if debug_node {
+                                    println!("[NODE]: {:?}", exp);
+                                }
+                                e
                             }
                         };
-                    }
-                    if !doc.is_empty() {
-                        println!("\x1b[31m[REMAINING]:\x1b[37m {:#?}", doc);
                     }
                 }
                 Err(e) => println!("\x1b[31m[ERROR]:\x1b[37m {:#?}", e),

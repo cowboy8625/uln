@@ -46,6 +46,13 @@ pub trait Parser<'a, Output> {
     {
         BoxedParser::new(and_then(self, f))
     }
+    fn dbg(self, msg: &'a str) -> BoxedParser<'a, Output>
+    where
+        Self: Sized + 'a,
+        Output: fmt::Debug + 'a,
+    {
+        BoxedParser::new(dbg_name(self, msg))
+    }
 }
 
 impl<'a, F, Output> Parser<'a, Output> for F
@@ -112,12 +119,16 @@ fn tag_parser() {
         parse_joe.parse(("Hello!".into(), None))
     );
     assert_eq!(
+        Ok((("".into(), None), ())),
+        tag("\n").parse(("\n".into(), None))
+    );
+    assert_eq!(
         Ok((("=".into(), None), ())),
         tag(">").parse((">=".into(), None))
     );
 }
 
-pub(crate) fn identifier<'a>((input, error): InputStream) -> ParseResult<String> {
+pub(crate) fn identifier<'a>((input, _error): InputStream) -> ParseResult<String> {
     let mut matched = String::new();
     let mut chars = input.chars();
     match chars.next() {
@@ -126,7 +137,7 @@ pub(crate) fn identifier<'a>((input, error): InputStream) -> ParseResult<String>
     }
 
     while let Some(next) = chars.next() {
-        if next.is_alphanumeric() || next == '-' {
+        if next.is_alphanumeric() || next == '_' {
             matched.push(next);
         } else {
             break;
@@ -140,12 +151,16 @@ pub(crate) fn identifier<'a>((input, error): InputStream) -> ParseResult<String>
 #[test]
 fn identifier_parser() {
     assert_eq!(
-        Ok((("".into(), None), "i-am-an-identifier".into())),
-        identifier(("i-am-an-identifier".into(), None))
+        Ok((("".into(), None), "i_am_an_identifier".into())),
+        identifier(("i_am_an_identifier".into(), None))
     );
     assert_eq!(
         Ok(((" entirely an identifier".into(), None), "not".into())),
         identifier(("not entirely an identifier".into(), None))
+    );
+    assert_eq!(
+        Ok((("two".into(), None), "one".into())),
+        trim(identifier).parse(("one two".into(), None))
     );
     let input: String = "!not at all an identifier".into();
     assert_eq!(
@@ -260,6 +275,7 @@ fn right_combinator() {
     // assert_eq!(Err("!oops".into()), tag_opener.parse("<!oops".into()));
 }
 
+#[allow(dead_code)]
 pub(crate) fn one_or_more<'a, P, A>(parser: P) -> impl Parser<'a, Vec<A>>
 where
     P: Parser<'a, A>,
@@ -356,6 +372,7 @@ pub(crate) fn whitespace_char<'a>() -> impl Parser<'a, char> {
     pred(any_char, |c| c.is_whitespace())
 }
 
+#[allow(dead_code)]
 pub(crate) fn space1<'a>() -> impl Parser<'a, Vec<char>> {
     one_or_more(whitespace_char())
 }
@@ -435,5 +452,29 @@ where
         parser
             .parse(input)
             .map_err(|next_input| map_err_fn(next_input))
+    }
+}
+
+pub(crate) fn dbg_name<'a, P, O>(parser: P, msg: &'a str) -> impl Parser<'a, O>
+where
+    O: fmt::Debug + 'a,
+    P: Parser<'a, O>,
+{
+    move |input| {
+        eprintln!("----START--{}----", msg);
+        let result = parser.parse(input);
+        match &result {
+            Ok(((next_input, error), output)) => {
+                eprintln!("next_input: {:?}", next_input);
+                eprintln!("output: {:?}", output);
+                eprintln!("error: {:?}", error);
+            }
+            Err((input, error)) => {
+                eprintln!("input: {:?}", input);
+                eprintln!("error: {:?}", &error);
+            }
+        }
+        eprintln!("----End----{}----", msg);
+        result
     }
 }

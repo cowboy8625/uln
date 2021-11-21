@@ -13,6 +13,8 @@ pub enum Operator {
     GreaterEqual,
     LessThan,
     LessEqual,
+    Or,
+    And,
 }
 
 impl fmt::Display for Operator {
@@ -29,6 +31,8 @@ impl fmt::Display for Operator {
             Self::GreaterEqual => write!(f, ">="),
             Self::LessThan => write!(f, "<"),
             Self::LessEqual => write!(f, "<="),
+            Self::Or => write!(f, "or"),
+            Self::And => write!(f, "and"),
         }
     }
 }
@@ -36,16 +40,26 @@ impl fmt::Display for Operator {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Node {
     Print(Box<Node>),
-    Ident(String),
+    Ident {
+        ident: String,
+        args: Vec<Box<Node>>,
+    },
     Variable {
         ident: String,
-        exp: Box<Node>,
+        param: Vec<String>,
+        block: Box<Node>,
     },
     True,
     False,
     Int(i128),
     Float(f64),
     Str(String),
+    Block(Vec<Box<Node>>),
+    Conditional {
+        condition: Box<Node>,
+        if_branch: Box<Node>,
+        else_branch: Option<Box<Node>>,
+    },
     UnaryExpr {
         op: Operator,
         child: Box<Node>,
