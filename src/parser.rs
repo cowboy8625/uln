@@ -1,87 +1,75 @@
-// program        → declaration* EOF ;
-//
-// declaration    → funDecl | varDecl | statement ;
-// funDecl        → "\" function ;
-// function       → parameter? block;
-// paramenters    → IDENTIFIER ( "," IDENTIFIER )* ;
-//
-//
-// statement      → printStmt | expression | ifStmt | block ;
-// block          → "{" declaration* "}"
-// ifStmt         → "if" expression "then" statement ( "else" statement )? ;
-// varDecl        → IDENTIFIER ( "=" ( expression | funDecl )? ;
-// printStmt      → "print" expression
-// expression     → logic_or ;
-// logic_or       → logic_and ( "or" logic_and )* ;
-// logic_and      → equality ( "and" equality )* ;
-// equality       → comparison ( ( "!=" | "==" ) comparison )* ;
-// comparison     → term ( ( ">" | ">=" | "<" | "<=" ) term )* ;
-// term           → factor ( ( "-" | "+" ) factor )* ;
-// factor         → unary ( ( "/" | "*" ) unary )* ;
-//
-// unary          → ( "!" | "-" ) unary | call ;
-// call           → primary ( arguments? )* ;
-// arguments      → expression ( "," expression)* ;
-//
-// primary        → NUMBER | STRING | "true" | "false" | "(" expression ")" | IDENTIFIER ;
-use crate::combinators::*;
 use crate::node::{Node, Operator};
+use npc::{
+    either, identifier, left, number, pair, quoted_string, right, tag, trim, zero_or_more, Error,
+    Parser,
+};
+
+const FUNCTION_DECL: &str = "fn";
+const EQUALS: &str = "=";
+const PLUS: &str = "+";
+const MINUS: &str = "-";
+const DIVID: &str = "/";
+const MULTIPLY: &str = "*";
+const LBRACE: &str = "{";
+const RBRACE: &str = "}";
+const LPAREN: &str = "(";
+const RPAREN: &str = ")";
+const IF: &str = "if";
+const THEN: &str = "then";
+const ELSE: &str = "else";
+const LESS_THEN: &str = "<";
+const LESS_EQUAL: &str = "<=";
+const GREATER_THAN: &str = ">";
+const GREATER_EQUAL: &str = ">=";
+const NOT_EQUAL: &str = "!=";
+const EQUAL_EQUAL: &str = "==";
+const TRUE: &str = "true";
+const FALSE: &str = "false";
 
 // program        → declaration* EOF ;
 pub fn program<'a>() -> impl Parser<'a, Vec<Node>> {
-    zero_or_more(declaration()) // .dbg("Program")
+    zero_or_more(declaration())
 }
 
 // declaration    → funDecl | varDecl | statement ;
 fn declaration<'a>() -> impl Parser<'a, Node> {
-    either(var_decl(), statement()) // .dbg("DECLARATION")
+    either(var_decl(), statement())
 }
 
-// funDecl        → "\" function ;
+// funDecl        → "fn" function ;
 fn fun_decl<'a>() -> impl Parser<'a, (Vec<String>, Node)> {
-    pair(tag("fun"), function()).map(|(_, n)| n)
-    // .dbg("FUNCTION DEC")
+    pair(tag(FUNCTION_DECL), function()).map(|(_, n)| n)
 }
 
 // function       → parameter? block;
 fn function<'a>() -> impl Parser<'a, (Vec<String>, Node)> {
-    pair(parameter(), block()) // .dbg("FUNCTION")
+    pair(parameter(), block())
 }
 
-// paramenters    → IDENTIFIER ( "," IDENTIFIER )* ;
+// paramenters    → IDENTIFIER ( IDENTIFIER )* ;
 fn parameter<'a>() -> impl Parser<'a, Vec<String>> {
-    zero_or_more(trim(identifier)) // .dbg("Parameters")
+    zero_or_more(trim(identifier))
 }
 
 // varDecl        → IDENTIFIER ( "=" expression )? ;
 fn var_decl<'a>() -> impl Parser<'a, Node> {
     either(
-        pair(
-            pair(
-                identifier,     // .dbg("Function Ident"),
-                trim(tag("=")), // .dbg("Assign Maybe to Function")),
-            ),
-            fun_decl(),
-        )
-        .map(|((ident, _), (param, block))| Node::Variable {
-            ident,
-            param,
-            block: Box::new(block),
+        pair(pair(identifier, trim(tag(EQUALS))), fun_decl()).map(
+            |((ident, _), (param, block))| Node::Variable {
+                ident,
+                param,
+                block: Box::new(block),
+                environment: None,
+            },
+        ),
+        pair(pair(identifier, trim(tag(EQUALS))), statement()).map(|((ident, _), block)| {
+            Node::Variable {
+                ident,
+                param: Vec::new(),
+                block: Box::new(block),
+                environment: None,
+            }
         }),
-        //.dbg("Var Dec For Function"),
-        pair(
-            pair(
-                identifier,     // .dbg("Var Ident"),
-                trim(tag("=")), // .dbg("Assign Maybe to this Var")),
-            ),
-            statement(),
-        )
-        .map(|((ident, _), block)| Node::Variable {
-            ident,
-            param: Vec::new(),
-            block: Box::new(block),
-        }),
-        // .dbg("Failed for Function on to Variable"),
     )
 }
 
@@ -92,18 +80,14 @@ fn statement<'a>() -> impl Parser<'a, Node> {
             print_statement(),
             either(if_else_statement(), if_statement()),
         ),
-        either(
-            expression(), /*.dbg("EXPRESSION")*/
-            block(),      //.dbg("BLOCK"),
-        ),
+        either(expression(), block()),
     )
 }
 
 // block          → "{" declaration* "}"
 fn block<'a>() -> impl Parser<'a, Node> {
     move |input| {
-        trim(tag("{"))
-            // .dbg("Entering BLOCK MAYBE")
+        trim(tag(LBRACE))
             .parse(input)
             .and_then(|(i1, _)| {
                 zero_or_more(declaration())
@@ -111,28 +95,23 @@ fn block<'a>() -> impl Parser<'a, Node> {
                     .map(|(i2, r2)| (i2, r2.iter().map(|n| Box::new(n.clone())).collect()))
                     .map(|(i, r)| (i, Node::Block(r)))
             })
-            .and_then(|(i1, r)| {
-                trim(tag("}"))
-                    // .dbg("EXITING BLOCK MAYBE")
-                    .parse(i1)
-                    .map(|(i2, _)| (i2, r))
-            })
+            .and_then(|(i1, r)| trim(tag(RBRACE)).parse(i1).map(|(i2, _)| (i2, r)))
     }
 }
 
 // ifStmt         → "if" expression "then" statement ( "else" statement )? ;
 fn if_else_statement<'a>() -> impl Parser<'a, Node> {
     move |input| {
-        trim(tag("if"))
+        trim(tag(IF))
             .parse(input)
             .and_then(|(i1, _)| expression().parse(i1).map(|(i2, r2)| (i2, r2)))
             .and_then(|(i1, r1)| {
-                trim(tag("then"))
+                trim(tag(THEN))
                     .parse(i1)
                     .and_then(|(i2, _)| statement().parse(i2).map(|(i3, r2)| (i3, (r1, r2))))
             })
             .and_then(|(i1, (r1, r2))| {
-                trim(tag("else"))
+                trim(tag(ELSE))
                     .parse(i1)
                     .and_then(|(i2, _)| statement().parse(i2).map(|(i3, r3)| (i3, (r1, r2, r3))))
             })
@@ -176,12 +155,11 @@ fn if_statement<'a>() -> impl Parser<'a, Node> {
 // printStmt → "print" expression ";" ;
 fn print_statement<'a>() -> impl Parser<'a, Node> {
     pair(tag("print"), expression()).map(|(_, exp)| Node::Print(Box::new(exp)))
-    // .dbg("PRINT")
 }
 
 // expression → assignment ;
 fn expression<'a>() -> impl Parser<'a, Node> {
-    logic_or() // .dbg("OR")
+    logic_or()
 }
 
 // logic_or → logic_and ( "or" logic_and )* ;
@@ -215,8 +193,8 @@ fn logic_and<'a>() -> impl Parser<'a, Node> {
 // equality → ( "!=" | "==" ) ;
 fn equality_op<'a>() -> impl Parser<'a, Operator> {
     trim(either(
-        tag("!=").map(|_| Operator::NotEqual),
-        tag("==").map(|_| Operator::Equality),
+        tag(NOT_EQUAL).map(|_| Operator::NotEqual),
+        tag(EQUAL_EQUAL).map(|_| Operator::Equality),
     ))
 }
 // equality → comparison ( ( "!=" | "==" ) comparison )* ;
@@ -249,12 +227,12 @@ fn equality<'a>() -> impl Parser<'a, Node> {
 fn comparison_op<'a>() -> impl Parser<'a, Operator> {
     either(
         either(
-            tag("<=").map(|_| Operator::LessEqual),
-            tag("<").map(|_| Operator::LessThan),
+            tag(LESS_EQUAL).map(|_| Operator::LessEqual),
+            tag(LESS_THEN).map(|_| Operator::LessThan),
         ),
         either(
-            tag(">=").map(|_| Operator::GreaterEqual),
-            tag(">").map(|_| Operator::GreaterThan),
+            tag(GREATER_EQUAL).map(|_| Operator::GreaterEqual),
+            tag(GREATER_THAN).map(|_| Operator::GreaterThan),
         ),
     )
 }
@@ -288,8 +266,8 @@ fn comparison<'a>() -> impl Parser<'a, Node> {
 // term → ( "-" | "+" ) ;
 fn term_op<'a>() -> impl Parser<'a, Operator> {
     either(
-        tag("-").map(|_| Operator::Minus),
-        tag("+").map(|_| Operator::Plus),
+        tag(MINUS).map(|_| Operator::Minus),
+        tag(PLUS).map(|_| Operator::Plus),
     )
 }
 // term           → factor ( ( "-" | "+" ) factor )* ;
@@ -321,8 +299,8 @@ fn term<'a>() -> impl Parser<'a, Node> {
 // factor → ( "/" | "*" ) ;
 fn factor_op<'a>() -> impl Parser<'a, Operator> {
     either(
-        tag("/").map(|_| Operator::Divide),
-        tag("*").map(|_| Operator::Multiply),
+        tag(DIVID).map(|_| Operator::Divide),
+        tag(MULTIPLY).map(|_| Operator::Multiply),
     )
 }
 
@@ -352,57 +330,47 @@ fn factor<'a>() -> impl Parser<'a, Node> {
     )
 }
 
-// unary          → ( "!" | "-" ) unary | primary ;
 // unary          → ( "!" | "-" ) unary | call ;
 fn unary<'a>() -> impl Parser<'a, Node> {
     trim(either(call(), either(unary_neg(), unary_bang())))
-    // either(unary_neg(), unary_bang())
 }
+
 // call           → primary ( arguments? )* ;
 fn call<'a>() -> impl Parser<'a, Node> {
-    move |input| {
-        trim(identifier).parse(input).and_then(|(i1, func_name)| {
-            arguments().parse(i1).map(|(i2, args)| {
-                (
-                    i2,
-                    Node::Ident {
-                        ident: func_name,
-                        args,
-                    },
-                )
+    move |input: (String, Option<Error<String>>)| {
+        trim(identifier)
+            .parse(input.clone())
+            .and_then(|(i1, func_name)| match func_name.as_str() {
+                "true" | "false" => return Err(input),
+                _ => arguments().parse(i1).map(|(i2, args)| {
+                    (
+                        i2,
+                        Node::Ident {
+                            ident: func_name,
+                            args,
+                        },
+                    )
+                }),
             })
-        })
-        // .map(|(ident, args)| Node::Ident {
-        //     ident: func_name,
-        //     args,
-        // })
     }
-    // pair(identifier, primary())
-    //     .dbg("CALL")
-    //     .map(|(ident, args)| Node::Ident {
-    //         ident,
-    //         args: vec![Box::new(args)],
-    //     })
 }
 // arguments      → expression ( "," expression)* ;
 fn arguments<'a>() -> impl Parser<'a, Vec<Box<Node>>> {
-    zero_or_more(expression())
-        .map(|vec_exp| vec_exp.iter().map(|exp| Box::new(exp.clone())).collect())
-
-    // either(
-    //     expression().map(|exp| vec![Box::new(exp)]),
-    // zero_or_more(pair(trim(tag(",")), expression())).map(|vec_tag_exp| {
-    //     vec_tag_exp
-    //         .iter()
-    //         .map(|(_, exp)| Box::new(exp.clone()))
-    //         .collect()
-    // })
-    // )
+    zero_or_more(either(
+        expression(),
+        fun_decl().map(|(param, block)| Node::Variable {
+            ident: "".into(),
+            param,
+            block: Box::new(block),
+            environment: None,
+        }),
+    ))
+    .map(|vec_exp| vec_exp.iter().map(|exp| Box::new(exp.clone())).collect())
 }
 
 // unary → "-"
 fn unary_neg<'a>() -> impl Parser<'a, Node> {
-    zero_or_more(trim(tag("-")))
+    zero_or_more(trim(tag(MINUS)))
         .map(|vec_of_op| {
             if vec_of_op.len() % 2 == 0 {
                 Operator::Plus
@@ -440,12 +408,11 @@ fn unary_bang<'a>() -> impl Parser<'a, Node> {
 fn primary<'a>() -> impl Parser<'a, Node> {
     either(
         either(
-            either(primary_number(), primary_string()),
-            either(primary_bool(), primary_paren()),
+            either(primary_bool(), primary_string()),
+            either(primary_number(), primary_paren()),
         ),
         primary_ident(),
     )
-    // .dbg("Entering into Primary")
 }
 
 // primary → IDENTIFIER
@@ -454,19 +421,18 @@ fn primary_ident<'a>() -> impl Parser<'a, Node> {
         ident,
         args: Vec::new(),
     })
-    // .dbg("IDENTIFIER")
 }
 
 // primary → "(" expression ")"
 fn primary_paren<'a>() -> impl Parser<'a, Node> {
-    right(tag("("), left(expression(), tag(")")))
+    right(tag(LPAREN), left(declaration(), tag(RPAREN)))
 }
 
 // primary → BOOL
 fn primary_bool<'a>() -> impl Parser<'a, Node> {
     either(
-        tag("true").map(|_| Node::True),
-        tag("false").map(|_| Node::False),
+        tag(TRUE).map(|_| Node::True),
+        tag(FALSE).map(|_| Node::False),
     )
 }
 
@@ -484,5 +450,4 @@ fn primary_number<'a>() -> impl Parser<'a, Node> {
             Node::Int(s.parse::<i128>().expect("Failed to parse String into i128"))
         }
     })
-    // .dbg("Int or Float")
 }

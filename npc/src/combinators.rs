@@ -91,7 +91,7 @@ impl<'a, Output> Parser<'a, Output> for BoxedParser<'a, Output> {
     }
 }
 
-pub(crate) fn tag<'a>(expected: &'static str) -> impl Parser<'a, ()> {
+pub fn tag<'a>(expected: &'static str) -> impl Parser<'a, ()> {
     move |(input, _error): InputStream| match input.get(0..expected.len()) {
         Some(next) if next == expected => Ok(((input[expected.len()..].into(), None), ())),
         _ => Err((
@@ -128,7 +128,7 @@ fn tag_parser() {
     );
 }
 
-pub(crate) fn identifier<'a>((input, _error): InputStream) -> ParseResult<String> {
+pub fn identifier<'a>((input, _error): InputStream) -> ParseResult<String> {
     let mut matched = String::new();
     let mut chars = input.chars();
     match chars.next() {
@@ -172,7 +172,7 @@ fn identifier_parser() {
     );
 }
 
-pub(crate) fn number((input, error): InputStream) -> ParseResult<String> {
+pub fn number((input, error): InputStream) -> ParseResult<String> {
     let mut matched = String::new();
     let mut chars = input.chars();
 
@@ -202,7 +202,7 @@ fn number_parser() {
     );
 }
 
-pub(crate) fn pair<'a, P1, P2, R1, R2>(parser1: P1, parser2: P2) -> impl Parser<'a, (R1, R2)>
+pub fn pair<'a, P1, P2, R1, R2>(parser1: P1, parser2: P2) -> impl Parser<'a, (R1, R2)>
 where
     P1: Parser<'a, R1>,
     P2: Parser<'a, R2>,
@@ -245,7 +245,7 @@ where
     }
 }
 
-pub(crate) fn left<'a, P1, P2, R1, R2>(parser1: P1, parser2: P2) -> impl Parser<'a, R1>
+pub fn left<'a, P1, P2, R1, R2>(parser1: P1, parser2: P2) -> impl Parser<'a, R1>
 where
     P1: Parser<'a, R1>,
     P2: Parser<'a, R2>,
@@ -253,7 +253,7 @@ where
     map(pair(parser1, parser2), |(left, _right)| left)
 }
 
-pub(crate) fn right<'a, P1, P2, R1, R2>(parser1: P1, parser2: P2) -> impl Parser<'a, R2>
+pub fn right<'a, P1, P2, R1, R2>(parser1: P1, parser2: P2) -> impl Parser<'a, R2>
 where
     P1: Parser<'a, R1>,
     P2: Parser<'a, R2>,
@@ -276,7 +276,7 @@ fn right_combinator() {
 }
 
 #[allow(dead_code)]
-pub(crate) fn one_or_more<'a, P, A>(parser: P) -> impl Parser<'a, Vec<A>>
+pub fn one_or_more<'a, P, A>(parser: P) -> impl Parser<'a, Vec<A>>
 where
     P: Parser<'a, A>,
 {
@@ -310,7 +310,7 @@ fn one_or_more_combinator() {
     // assert_eq!(Err("".into()), parser.parse("".into()));
 }
 
-pub(crate) fn zero_or_more<'a, P, A>(parser: P) -> impl Parser<'a, Vec<A>>
+pub fn zero_or_more<'a, P, A>(parser: P) -> impl Parser<'a, Vec<A>>
 where
     P: Parser<'a, A>,
 {
@@ -337,7 +337,7 @@ fn zero_or_more_combinator() {
     // assert_eq!(Ok(("".into(), vec![])), parser.parse("".into()));
 }
 
-pub(crate) fn any_char<'a>((input, _error): InputStream) -> ParseResult<char> {
+pub fn any_char<'a>((input, _error): InputStream) -> ParseResult<char> {
     match input.chars().next() {
         Some(next) => Ok(((input[next.len_utf8()..].into(), None), next)),
         _ => Err((input.clone(), Some(Error::new(input, ErrorKind::AnyChar)))),
@@ -368,20 +368,20 @@ fn predicate_combinator() {
     );
 }
 
-pub(crate) fn whitespace_char<'a>() -> impl Parser<'a, char> {
+pub fn whitespace_char<'a>() -> impl Parser<'a, char> {
     pred(any_char, |c| c.is_whitespace())
 }
 
 #[allow(dead_code)]
-pub(crate) fn space1<'a>() -> impl Parser<'a, Vec<char>> {
+pub fn space1<'a>() -> impl Parser<'a, Vec<char>> {
     one_or_more(whitespace_char())
 }
 
-pub(crate) fn space0<'a>() -> impl Parser<'a, Vec<char>> {
+pub fn space0<'a>() -> impl Parser<'a, Vec<char>> {
     zero_or_more(whitespace_char())
 }
 
-pub(crate) fn quoted_string<'a>() -> impl Parser<'a, String> {
+pub fn quoted_string<'a>() -> impl Parser<'a, String> {
     right(
         tag("\""),
         left(zero_or_more(any_char.pred(|c| *c != '"')), tag("\"")),
@@ -397,7 +397,7 @@ pub fn quoted_string_parser() {
     );
 }
 
-pub(crate) fn either<'a, P1, P2, A>(parser1: P1, parser2: P2) -> impl Parser<'a, A>
+pub fn either<'a, P1, P2, A>(parser1: P1, parser2: P2) -> impl Parser<'a, A>
 where
     P1: Parser<'a, A>,
     P2: Parser<'a, A>,
@@ -436,7 +436,7 @@ where
     }
 }
 
-pub(crate) fn trim<'a, P, A>(parser: P) -> impl Parser<'a, A>
+pub fn trim<'a, P, A>(parser: P) -> impl Parser<'a, A>
 where
     P: Parser<'a, A>,
 {
@@ -455,7 +455,7 @@ where
     }
 }
 
-pub(crate) fn dbg_name<'a, P, O>(parser: P, msg: &'a str) -> impl Parser<'a, O>
+pub fn dbg_name<'a, P, O>(parser: P, msg: &'a str) -> impl Parser<'a, O>
 where
     O: fmt::Debug + 'a,
     P: Parser<'a, O>,

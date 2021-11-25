@@ -1,3 +1,4 @@
+use crate::Environment;
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -48,6 +49,7 @@ pub enum Node {
         ident: String,
         param: Vec<String>,
         block: Box<Node>,
+        environment: Option<Environment>,
     },
     True,
     False,

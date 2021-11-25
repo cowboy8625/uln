@@ -1,5 +1,3 @@
-#[cfg(test)]
-use pretty_assertions::assert_eq;
 use std::{collections::HashMap, fmt};
 
 use crate::node::{Node, Operator};
@@ -50,37 +48,34 @@ pub fn eval(node: Node, mut env: Environment) -> EvalResult {
         },
         Node::Ident { ident, args } => match env.get(&ident) {
             Some(node) => match node {
-                Node::Variable { param, block, .. } => {
-                    let mut block_env = Environment::new();
+                Node::Variable {
+                    param,
+                    block,
+                    environment,
+                    ..
+                } => {
+                    if param.len() != args.len() {
+                        return Err((EvalError::FunctionParameters(param.len(), args.len()), env));
+                    }
+
+                    let mut block_env = environment.clone().unwrap_or(Environment::new());
                     for (p, arg) in param.iter().zip(args) {
                         block_env.insert(p.clone(), *arg);
                     }
                     match execute_block(*block.clone(), block_env) {
-                        Ok((v, e)) => Ok((v, env)),
-                        Err((input, e)) => {
-                            println!("INPUT: {:?} ENV: {:#?}", input, e);
-                            eval(*block.clone(), env)
-                        }
+                        Ok((v, _)) => Ok((v, env)),
+                        Err(_) => eval(*block.clone(), env),
                     }
                 }
-                n => {
-                    eval(n.clone(), env)
-                    //     Err((
-                    //     EvalError::TypeError("I think this is the wrong thing maybe.....".into()),
-                    //     env,
-                    // ));
-                }
+                n => eval(n.clone(), env),
             },
-            None => {
-                // println!("VAR env: {:?}", env);
-                // println!("VAR args: {:?}", args);
-                Err((EvalError::UnKnownIdent(ident), env))
-            }
+            None => Err((EvalError::UnKnownIdent(ident), env)),
         },
         Node::Variable {
             ident,
             param,
             block,
+            ..
         } => {
             if env.contains_key(&ident) {
                 return Err((EvalError::Mutations(ident), env));
@@ -91,9 +86,10 @@ pub fn eval(node: Node, mut env: Environment) -> EvalResult {
                     ident,
                     param,
                     block,
+                    environment: Some(env.clone()),
                 },
             );
-            return Ok((Value::NONE, env));
+            Ok((Value::NONE, env))
         }
         Node::True => Ok((Value::Bool(true), env)),
         Node::False => Ok((Value::Bool(false), env)),
@@ -264,8 +260,6 @@ pub fn eval(node: Node, mut env: Environment) -> EvalResult {
 
 fn execute_block(node: Node, mut block_env: Environment) -> EvalResult {
     if let Node::Block(expressions) = node {
-        // println!("BLOCK expressions: {:?}", expressions);
-        // println!("BLOCK block_env: {:?}", block_env);
         let mut inner = Value::NONE;
         for exp in expressions {
             let (i, e) = eval(*exp, block_env)?;
@@ -278,51 +272,4 @@ fn execute_block(node: Node, mut block_env: Environment) -> EvalResult {
         EvalError::TypeError("Never Will Fail HERE. But if so I am in execute_block".into()),
         block_env,
     ))
-}
-
-#[test]
-fn execute_block_test() {
-    let mut env = Environment::new();
-    let func = Node::Variable {
-        ident: "add".into(),
-        param: vec!["x".into(), "y".into()],
-        block: Box::new(Node::BinaryExpr {
-            op: Operator::Plus,
-            rhs: Box::new(Node::UnaryExpr {
-                op: Operator::Plus,
-                child: Box::new(Node::Ident {
-                    ident: "x".into(),
-                    args: vec![],
-                }),
-            }),
-            lhs: Box::new(Node::UnaryExpr {
-                op: Operator::Plus,
-                child: Box::new(Node::Ident {
-                    ident: "y".into(),
-                    args: vec![],
-                }),
-            }),
-        }),
-    };
-
-    env.insert("add".to_string(), func);
-    let func_call = Node::Ident {
-        ident: "add".into(),
-
-        args: vec![
-            Box::new(Node::UnaryExpr {
-                op: Operator::Plus,
-                child: Box::new(Node::Int(1)),
-            }),
-            Box::new(Node::UnaryExpr {
-                op: Operator::Plus,
-                child: Box::new(Node::Int(2)),
-            }),
-        ],
-    };
-    // eprintln!("{:#?}", env);
-    // eprintln!("----");
-    // eprintln!("{:#?}", func_call);
-    let value = eval(func_call, env.clone());
-    assert_eq!(value, Ok((Value::Int(3), env)));
 }
