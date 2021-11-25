@@ -7,8 +7,7 @@ For grammer of languages see [grammer](./GRAMMER.md).
 - :exit ---------> exit program.
 - :help ---------> Output this message.
 - :clear --------> Clear shell screen.
-- :debug_io -----> shows Value output, more useful for development.
-- :debug_node ---> shows AST output, more useful for development.
+
 
 
 #### Language Syntax:
