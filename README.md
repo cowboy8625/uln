@@ -1,5 +1,10 @@
 # lite-lang
 
+### Quick Start
+
+`cargo run --release -- repl`
+or
+`cargo run --release -- --help`
 
 For grammer of languages see [grammer](./GRAMMER.md).
 
