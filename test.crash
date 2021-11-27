@@ -1,7 +1,11 @@
-print 1 + 2 + 2 * 5
+// Comment line shouldnt effect code
 if false then
-    print "1 WORKED"
+    print "If Condition"
 else if false then
-    print "2 ELSE IF WORKED"
+    print "Else" + " If " + "Condition"
 else
-    print "3 ELSE WORKED"
+    print "Else"
+
+add x y = x + y
+println "Function worked"
+println (add 1 2)

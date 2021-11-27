@@ -1,24 +1,34 @@
-use crate::{eval, program, Environment, Parser, Value};
+use std::borrow::Cow::{self, Borrowed, Owned};
 
+use rustyline::completion::{Completer, FilenameCompleter, Pair};
+use rustyline::config::OutputStreamType;
+use rustyline::error::ReadlineError;
+use rustyline::highlight::{Highlighter, MatchingBracketHighlighter};
+use rustyline::hint::{Hinter, HistoryHinter};
+use rustyline::validate::{self, MatchingBracketValidator, Validator};
+use rustyline::{Cmd, CompletionType, Config, Context, EditMode, Editor, KeyEvent};
+use rustyline_derive::Helper;
+
+use crate::interpreter::{interpreter_expr, Environment};
+use crate::parser::parser;
 fn run_block(block: &str, mut env: Environment) -> Environment {
-    match program().parse((block.clone().into(), None)) {
-        Ok(((_doc, _), vec_exp)) => {
-            for exp in vec_exp {
-                env = match eval(exp.clone(), env) {
-                    Ok((v, e)) => {
-                        if Value::NONE != v {
-                            println!("[OUT]: {}", v);
-                        }
-                        e
+    if block.is_empty() {
+        return env;
+    }
+    match parser(block) {
+        Ok((input, expr)) => {
+            for ex in expr {
+                let (cons_vec, e) = interpreter_expr(ex, env);
+                env = e;
+                for cons in cons_vec {
+                    println!("[OUT]: {:?}", cons);
+                    if !input.is_empty() {
+                        println!("[LEFTOVER]: {:?}", input);
                     }
-                    Err((error, e)) => {
-                        println!("[ERROR]: {}", error);
-                        e
-                    }
-                };
+                }
             }
         }
-        Err(e) => println!("[ERROR]: {:?}", e),
+        Err(e) => println!("[ERROR]: {:#?}", e),
     }
     env
 }
@@ -47,17 +57,6 @@ fn shell_help() {
         )
     );
 }
-
-use std::borrow::Cow::{self, Borrowed, Owned};
-
-use rustyline::completion::{Completer, FilenameCompleter, Pair};
-use rustyline::config::OutputStreamType;
-use rustyline::error::ReadlineError;
-use rustyline::highlight::{Highlighter, MatchingBracketHighlighter};
-use rustyline::hint::{Hinter, HistoryHinter};
-use rustyline::validate::{self, MatchingBracketValidator, Validator};
-use rustyline::{Cmd, CompletionType, Config, Context, EditMode, Editor, KeyEvent};
-use rustyline_derive::Helper;
 
 #[derive(Helper)]
 struct MyHelper {
@@ -128,8 +127,6 @@ impl Validator for MyHelper {
     }
 }
 
-// To debug rustyline:
-// RUST_LOG=rustyline=debug cargo run --example example 2> debug.log
 pub fn run() -> rustyline::Result<()> {
     env_logger::init();
     let config = Config::builder()
@@ -146,13 +143,13 @@ pub fn run() -> rustyline::Result<()> {
         validator: MatchingBracketValidator::new(),
     };
     let mut rl = Editor::with_config(config);
-    let mut env = Environment::new();
     rl.set_helper(Some(h));
     rl.bind_sequence(KeyEvent::alt('n'), Cmd::HistorySearchForward);
     rl.bind_sequence(KeyEvent::alt('p'), Cmd::HistorySearchBackward);
     if rl.load_history("history.txt").is_err() {
         println!("No previous history.");
     }
+    let mut env = Environment::new();
     let mut count = 1;
     loop {
         let p = format!("IN [{}]: ", count);
@@ -163,6 +160,7 @@ pub fn run() -> rustyline::Result<()> {
                 rl.add_history_entry(line.as_str());
                 match line.as_str() {
                     ":exit" => break,
+                    ":clear" => print!("\x1b[2J\x1b[0;0H"),
                     ":help" => shell_help(),
                     _ => {
                         env = run_block(line.trim(), env);

@@ -1,5 +1,3 @@
 /target
-*.vim
-*.lock
-history.txt
+*.txt
 *.crash
